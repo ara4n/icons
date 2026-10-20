@@ -7,47 +7,70 @@ const q=new URLSearchParams(location.search), SEED=+(q.get('seed')||7), T0=+(q.g
 let s=SEED; const rnd=()=>{s=(s*1664525+1013904223)>>>0; return s/2**32};
 const tiles=await (await fetch('tiles.json')).json();
 const renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});
-renderer.setPixelRatio(Math.min(devicePixelRatio||1,2)); renderer.shadowMap.enabled=q.get("shadows")!=="0"; renderer.shadowMap.type=THREE.PCFShadowMap;
-renderer.outputColorSpace=THREE.SRGBColorSpace; document.body.appendChild(renderer.domElement);
+renderer.setPixelRatio(Math.min(devicePixelRatio||1,2)); renderer.outputColorSpace=THREE.SRGBColorSpace; document.body.appendChild(renderer.domElement);
 const BG=0x000000, scene=new THREE.Scene(); scene.background=new THREE.Color(BG); scene.fog=new THREE.Fog(BG,9,18);
 const cam=new THREE.PerspectiveCamera(50,1,0.1,19);
 const resize=()=>{renderer.setSize(innerWidth,innerHeight); cam.aspect=innerWidth/innerHeight; cam.updateProjectionMatrix();}; addEventListener('resize',resize); resize();
-scene.add(new THREE.HemisphereLight(0xffffff,0x334,1.3));
-const sun=new THREE.DirectionalLight(0xffffff,1.6); sun.castShadow=true; sun.shadow.mapSize.set(2048,2048);
-Object.assign(sun.shadow.camera,{left:-14,right:14,top:14,bottom:-14,near:0.1,far:40}); sun.shadow.bias=-0.0005; sun.shadow.normalBias=0.02; sun.shadow.camera.updateProjectionMatrix(); scene.add(sun,sun.target);
-const shape=new THREE.Shape(); const r=0.16, h=0.5;
+
+// --- geometry: rounded-square top (ShapeGeometry) + hand-built side strip, both with unique 0..1 UVs for the lightmap
+const r=0.16, h=0.5, HT=0.21, GAP=1.16, shape=new THREE.Shape();
 shape.moveTo(-h+r,-h); shape.lineTo(h-r,-h); shape.absarc(h-r,-h+r,r,-Math.PI/2,0,false); shape.lineTo(h,h-r); shape.absarc(h-r,h-r,r,0,Math.PI/2,false);
 shape.lineTo(-h+r,h); shape.absarc(-h+r,h-r,r,Math.PI/2,Math.PI,false); shape.lineTo(-h,-h+r); shape.absarc(-h+r,-h+r,r,Math.PI,1.5*Math.PI,false);
-const geo=new THREE.ExtrudeGeometry(shape,{depth:0.42,bevelEnabled:false,curveSegments:12}); geo.rotateX(-Math.PI/2); geo.translate(0,-0.21,0);
+const geoTop=new THREE.ShapeGeometry(shape,12); {const u=geoTop.attributes.uv; for(let i=0;i<u.count;i++)u.setXY(i,u.getX(i)+0.5,u.getY(i)+0.5);}
+geoTop.rotateX(-Math.PI/2); geoTop.translate(0,HT,0); geoTop.setAttribute('uv1',geoTop.attributes.uv);
+const pts=shape.getPoints(12); if(pts[pts.length-1].equals(pts[0]))pts.pop();
+const geoSide=(()=>{const P=[],Nn=[],U=[],I=[],L=[0]; const n=pts.length;
+  for(let i=0;i<n;i++)L.push(L[i]+pts[i].distanceTo(pts[(i+1)%n]));
+  for(let i=0;i<n;i++){const a=pts[i],b=pts[(i+1)%n], d=b.clone().sub(a).normalize(); let nx=d.y,nz=d.x; // shape (x,y) -> world (x,·,-y)
+    const mx=(a.x+b.x)/2, mz=-(a.y+b.y)/2; if(nx*mx+nz*mz<0){nx=-nx;nz=-nz;}
+    const v=[[a.x,-HT,-a.y],[b.x,-HT,-b.y],[b.x,HT,-b.y],[a.x,HT,-a.y]], u=[[L[i]/L[n],0],[L[i+1]/L[n],0],[L[i+1]/L[n],1],[L[i]/L[n],1]], k=P.length/3;
+    v.forEach((p,j)=>{P.push(...p); Nn.push(nx,0,nz); U.push(...u[j]);});
+    const e1=[v[1][0]-v[0][0],v[1][1]-v[0][1],v[1][2]-v[0][2]], e2=[v[2][0]-v[0][0],v[2][1]-v[0][1],v[2][2]-v[0][2]];
+    const cx=e1[1]*e2[2]-e1[2]*e2[1], cz=e1[0]*e2[1]-e1[1]*e2[0];
+    if(cx*nx+cz*nz>0)I.push(k,k+1,k+2,k,k+2,k+3); else I.push(k,k+2,k+1,k,k+3,k+2);}
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(P,3)); g.setAttribute('normal',new THREE.Float32BufferAttribute(Nn,3));
+  g.setAttribute('uv',new THREE.Float32BufferAttribute(U,2)); g.setAttribute('uv1',g.attributes.uv); g.setIndex(I); return g;})();
+
+// --- bake: light a 3x3 lattice of boxes with real shadows once, rendering the centre box's lighting into UV space
+const bakeMat=()=>{const m=new THREE.MeshStandardMaterial({color:0xffffff,roughness:1,metalness:0});
+  m.onBeforeCompile=sh=>{sh.vertexShader='attribute vec2 uv1;\n'+sh.vertexShader.replace('#include <project_vertex>','#include <project_vertex>\ngl_Position=vec4(uv1*2.0-1.0,0.0,1.0);');}; return m;};
+const hidden=new THREE.MeshBasicMaterial({colorWrite:false,depthWrite:false});
+const bake=(geo,w,hh)=>{const bs=new THREE.Scene(); bs.add(new THREE.HemisphereLight(0xffffff,0x334,1.3));
+  const sun=new THREE.DirectionalLight(0xffffff,1.6); sun.position.set(7,8,5); sun.castShadow=true; sun.shadow.mapSize.set(2048,2048);
+  Object.assign(sun.shadow.camera,{left:-3,right:3,top:3,bottom:-3,near:0.1,far:40}); sun.shadow.bias=-0.0005; sun.shadow.normalBias=0.02; sun.shadow.camera.updateProjectionMatrix(); bs.add(sun,sun.target);
+  for(let i=-1;i<=1;i++)for(let j=-1;j<=1;j++)for(const g of [geoTop,geoSide]){const c=i==0&&j==0&&g==geo; const m=new THREE.Mesh(g,c?bakeMat():hidden);
+    m.position.set(i*GAP,0,j*GAP); m.castShadow=true; m.receiveShadow=c; bs.add(m);}
+  const rt=new THREE.WebGLRenderTarget(w,hh); renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  renderer.setRenderTarget(rt); renderer.setClearColor(0x888888); renderer.render(bs,new THREE.PerspectiveCamera()); renderer.setRenderTarget(null); renderer.shadowMap.enabled=false; return rt.texture;};
+const lmTop=bake(geoTop,512,512), lmSide=bake(geoSide,1024,128), LMI=Math.PI; // MeshBasic divides the lightmap by pi
+
+// --- textures and materials (unlit: texture x baked lightmap)
 const loader=new THREE.TextureLoader();
-const texs=await Promise.all(tiles.map(t=>loader.loadAsync('tiles/'+t.name+'.png').catch(()=>loader.loadAsync('tiles/'+t.name+'.png?r=1')).catch(()=>null).then(tx=>{if(!tx)return null; tx.colorSpace=THREE.SRGBColorSpace; tx.anisotropy=8; tx.offset.set(0.5,0.5); return tx;})));
-// split the extrusion into cap + side geometries so each can be instanced with one material
-const sub=g=>{const o=new THREE.BufferGeometry(); for(const k in geo.attributes){const at=geo.attributes[k]; o.setAttribute(k,new THREE.BufferAttribute(at.array.slice(g.start*at.itemSize,(g.start+g.count)*at.itemSize),at.itemSize));} return o;};
-const geoTop=sub(geo.groups[0]), geoSide=sub(geo.groups[1]);
-// big tiled array in 9x10 blocks; each block is its own shuffle of every icon, so repeats are at most one per block
-const GAP=1.16, N=24, HALF=N*GAP, BW=9, BH=10, blocks={}, cells=tiles.map(()=>[]), pos=[];
+const texs=await Promise.all(tiles.map(t=>loader.loadAsync('tiles/'+t.name+'.png').catch(()=>loader.loadAsync('tiles/'+t.name+'.png?r=1')).catch(()=>null).then(tx=>{if(!tx)return null; tx.colorSpace=THREE.SRGBColorSpace; tx.anisotropy=8; return tx;})));
+
+// --- big tiled array in 9x10 blocks; each block is its own shuffle of every icon, so repeats are at most one per block
+const N=24, HALF=N*GAP, BW=9, BH=10, blocks={}, cells=tiles.map(()=>[]), pos=[];
 const shuffled=()=>{const a=tiles.map((_,k)=>k); for(let i=a.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a;};
 for(let i=-N;i<N;i++)for(let j=-N;j<N;j++){const bi=Math.floor((i+N)/BW), bj=Math.floor((j+N)/BH), key=bi+','+bj;
   const b=blocks[key]||(blocks[key]=shuffled()), t=b[((i+N)%BW*BH+(j+N)%BH)%b.length];
   cells[t].push(pos.length); pos.push([i*GAP+GAP/2,0,j*GAP+GAP/2]);}
-// one instanced mesh per logo for the tops (~90 draw calls) and a single colour-per-instance mesh for every side
+// one instanced mesh per logo for the tops and a single colour-per-instance mesh for every side
 const M=new THREE.Matrix4();
-const sides=new THREE.InstancedMesh(geoSide,new THREE.MeshStandardMaterial({roughness:0.6}),pos.length);
-pos.forEach((p,k)=>{sides.setMatrixAt(k,M.makeTranslation(...p));});
-tiles.forEach((t,ti)=>{const top=new THREE.InstancedMesh(geoTop,new THREE.MeshStandardMaterial({map:texs[ti],roughness:0.5}),cells[ti].length);
-  cells[ti].forEach((k,n)=>{top.setMatrixAt(n,M.makeTranslation(...pos[k])); sides.setColorAt(k,new THREE.Color(t.side));});
-  top.castShadow=top.receiveShadow=true; scene.add(top);});
-sides.castShadow=sides.receiveShadow=true; scene.add(sides);
-// camera: lissajous over the array, a few units above the tops, pitched down; fog hides the edges well before the array ends
+const sides=new THREE.InstancedMesh(geoSide,new THREE.MeshBasicMaterial({lightMap:lmSide,lightMapIntensity:LMI}),pos.length);
+pos.forEach((p,k)=>sides.setMatrixAt(k,M.makeTranslation(...p)));
+tiles.forEach((t,ti)=>{const top=new THREE.InstancedMesh(geoTop,new THREE.MeshBasicMaterial({map:texs[ti],lightMap:lmTop,lightMapIntensity:LMI}),cells[ti].length);
+  cells[ti].forEach((k,n)=>{top.setMatrixAt(n,M.makeTranslation(...pos[k])); sides.setColorAt(k,new THREE.Color(t.side));}); scene.add(top);});
+scene.add(sides);
+
+// --- camera: lissajous over the array, a few units above the tops, pitched down and facing the direction of travel
 const ALT=3.2, PITCH=-0.75, AMP=HALF-14, tgt=new THREE.Vector3(), dir=new THREE.Vector3(); let yaw=0;
 const t0=performance.now();
 function frame(){const t=T0+(performance.now()-t0)/1000*SPEED*0.06;
-  cam.position.set(AMP*Math.sin(3*t), 0.21+ALT+0.4*Math.sin(1.3*t), AMP*Math.sin(2.03*t+Math.PI/3));
-  const want=Math.atan2(3*Math.cos(3*t),2.03*Math.cos(2.03*t+Math.PI/3)); // heading = analytic velocity of the path
-  yaw+=Math.atan2(Math.sin(want-yaw),Math.cos(want-yaw))*0.03;          // ease toward it so turning points swing rather than snap
+  cam.position.set(AMP*Math.sin(3*t), HT+ALT+0.4*Math.sin(1.3*t), AMP*Math.sin(2.03*t+Math.PI/3));
+  const want=Math.atan2(3*Math.cos(3*t),2.03*Math.cos(2.03*t+Math.PI/3));
+  yaw+=Math.atan2(Math.sin(want-yaw),Math.cos(want-yaw))*0.03;
   dir.set(Math.sin(yaw)*Math.cos(PITCH),Math.sin(PITCH),Math.cos(yaw)*Math.cos(PITCH));
   cam.lookAt(tgt.copy(cam.position).add(dir));
-  sun.position.set(cam.position.x+7,8,cam.position.z+5); sun.target.position.set(cam.position.x,0,cam.position.z);
   renderer.render(scene,cam); document.title='fly'; requestAnimationFrame(frame);}
 frame();
 </script></body></html>
