@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Rabble">
+  <defs>
+    <linearGradient id="background" x1="12" y1="8" x2="116" y2="124" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#153b3d"/>
+      <stop offset="1" stop-color="#071f22"/>
+    </linearGradient>
+    <linearGradient id="bubble-fill" x1="24" y1="20" x2="104" y2="110" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#79e5c0"/>
+      <stop offset="1" stop-color="#28ae8e"/>
+    </linearGradient>
+    <linearGradient id="person" x1="52" y1="66" x2="76" y2="101" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#bff7df"/>
+      <stop offset="1" stop-color="#71dfba"/>
+    </linearGradient>
+    <!-- The bubble and its tail are one silhouette. Everything in the crowd is
+         clipped to this shape, so no person can leak through its edge. -->
+    <path id="bubble" d="M30 20h68a18 18 0 0 1 18 18v43a18 18 0 0 1-18 18H80l-18 13 4-13H30A18 18 0 0 1 12 81V38a18 18 0 0 1 18-18Z"/>
+    <clipPath id="inside-bubble"><use href="#bubble"/></clipPath>
+  </defs>
+
+  <!-- Full-bleed brand color: platforms may apply their own icon mask. -->
+  <path fill="url(#background)" d="M0 0h128v128H0z"/>
+  <use href="#bubble" fill="url(#bubble-fill)"/>
+
+  <g clip-path="url(#inside-bubble)">
+    <!-- Back row -->
+    <g fill="#126a5d">
+      <circle cx="29" cy="61" r="8"/><path d="M15 87c0-13 5-20 14-20s14 7 14 20v15H15z"/>
+      <circle cx="46" cy="57" r="8"/><path d="M32 84c0-13 5-20 14-20s14 7 14 20v18H32z"/>
+      <circle cx="64" cy="55" r="8"/><path d="M50 83c0-13 5-20 14-20s14 7 14 20v19H50z"/>
+      <circle cx="82" cy="57" r="8"/><path d="M68 84c0-13 5-20 14-20s14 7 14 20v18H68z"/>
+      <circle cx="99" cy="61" r="8"/><path d="M85 87c0-13 5-20 14-20s14 7 14 20v15H85z"/>
+    </g>
+
+    <!-- Front row. All bodies end cleanly at the bubble silhouette. -->
+    <g fill="#36b895">
+      <circle cx="39" cy="72" r="10"/><path d="M21 103c0-15 7-24 18-24s18 9 18 24v13H21z"/>
+      <circle cx="89" cy="72" r="10"/><path d="M71 103c0-15 7-24 18-24s18 9 18 24v13H71z"/>
+    </g>
+    <g fill="url(#person)">
+      <circle cx="64" cy="76" r="11"/>
+      <path d="M44 108c0-17 8-27 20-27s20 10 20 27v16H44z"/>
+    </g>
+  </g>
+
+  <!-- Conversation marks remain above the heads and contrast with the bubble. -->
+  <path d="M64 31v10M46 36l6 9M82 36l-6 9" fill="none" stroke="#0b3435" stroke-width="5" stroke-linecap="round"/>
+</svg>

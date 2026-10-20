@@ -1,0 +1,45 @@
+<!doctype html><html><head><meta charset="utf-8"><title>montage</title>
+<style>html,body{margin:0;width:1280px;height:720px;overflow:hidden;background:radial-gradient(ellipse at 50% 40%,#2a2550 0%,#14122a 60%,#0a0816 100%)}canvas{display:block}</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
+</head><body><script type="module">
+import * as THREE from 'three';
+
+const W=1280,H=720, q=new URLSearchParams(location.search);
+const SEED=+(q.get('seed')||7), PX=+(q.get('px')||150);      // px = on-screen width of one box
+let s=SEED; const rnd=()=>{s=(s*1664525+1013904223)>>>0; return s/2**32};
+const tiles=await (await fetch('tiles.json')).json();
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true,preserveDrawingBuffer:true});
+renderer.setPixelRatio(window.devicePixelRatio||1); renderer.setSize(W,H); renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.outputColorSpace=THREE.SRGBColorSpace; document.body.appendChild(renderer.domElement);
+const scene=new THREE.Scene();
+const fw=W/PX*Math.SQRT2, fh=fw*H/W;                        // frustum sized so a 1-unit box is PX wide
+const cam=new THREE.OrthographicCamera(-fw/2,fw/2,fh/2,-fh/2,-100,100);
+cam.position.set(10,10,10); cam.lookAt(0,0,0); cam.updateMatrixWorld(); cam.updateProjectionMatrix();
+scene.add(new THREE.HemisphereLight(0xffffff,0x334,1.3));
+const sun=new THREE.DirectionalLight(0xffffff,1.6); sun.position.set(7,8,5); sun.castShadow=true;
+sun.shadow.mapSize.set(4096,4096); Object.assign(sun.shadow.camera,{left:-24,right:24,top:24,bottom:-24,near:0.1,far:80}); sun.shadow.bias=-0.0005; sun.shadow.normalBias=0.02; sun.shadow.camera.updateProjectionMatrix();  scene.add(sun);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(100,100),new THREE.MeshStandardMaterial({color:0x4a4488,roughness:1})); ground.rotation.x=-Math.PI/2; ground.position.y=-0.21; ground.receiveShadow=true; scene.add(ground);
+const shape=new THREE.Shape(); const r=0.16, h=0.5; // rounded-square footprint, sharp vertical edges
+shape.moveTo(-h+r,-h); shape.lineTo(h-r,-h); shape.absarc(h-r,-h+r,r,-Math.PI/2,0,false); shape.lineTo(h,h-r); shape.absarc(h-r,h-r,r,0,Math.PI/2,false);
+shape.lineTo(-h+r,h); shape.absarc(-h+r,h-r,r,Math.PI/2,Math.PI,false); shape.lineTo(-h,-h+r); shape.absarc(-h+r,-h+r,r,Math.PI,1.5*Math.PI,false);
+const geo=new THREE.ExtrudeGeometry(shape,{depth:0.42,bevelEnabled:false,curveSegments:12}); geo.rotateX(-Math.PI/2); geo.translate(0,-0.21,0);
+const loader=new THREE.TextureLoader();
+const sc=document.createElement('canvas'); sc.width=sc.height=256; const g=sc.getContext('2d');
+g.filter='blur(14px)'; g.fillStyle='rgba(0,0,0,0.85)'; g.beginPath(); g.roundRect(48,48,160,160,32); g.fill();
+const shadowTex=new THREE.CanvasTexture(sc); const shadowGeo=new THREE.PlaneGeometry(1.7,1.7); shadowGeo.rotateX(-Math.PI/2);
+const shadowMat=new THREE.MeshBasicMaterial({map:shadowTex,transparent:true,depthWrite:false});
+const texs=await Promise.all(tiles.map(t=>loader.loadAsync('tiles/'+t.name+'.png').catch(()=>loader.loadAsync('tiles/'+t.name+'.png?r=1')).catch(e=>{console.log('TEXFAIL '+t.name); return null;}).then(tx=>{if(!tx)return null; tx.colorSpace=THREE.SRGBColorSpace; tx.anisotropy=8; tx.offset.set(0.5,0.5); return tx;})));
+// grid of candidate positions; project to find which are fully visible
+const GAP=1.16, N=18, slots=[];
+for(let i=-N;i<=N;i++)for(let j=-N;j<=N;j++){const p=new THREE.Vector3(i*GAP,0,j*GAP);
+  const corners=[[-.5,.21,-.5],[.5,.21,-.5],[.5,.21,.5],[-.5,.21,.5],[-.5,-.21,-.5],[.5,-.21,-.5],[.5,-.21,.5],[-.5,-.21,.5]].map(c=>p.clone().add(new THREE.Vector3(...c)).project(cam));
+  const inside=corners.every(v=>Math.abs(v.x)<1&&Math.abs(v.y)<1), near=corners.some(v=>Math.abs(v.x)<1.3&&Math.abs(v.y)<1.3);
+  if(near) slots.push({p,vis:inside});}
+const order=[...slots.filter(s=>s.vis),...slots.filter(s=>!s.vis)];
+const idx=tiles.map((_,i)=>i); for(let i=idx.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[idx[i],idx[j]]=[idx[j],idx[i]];}
+order.forEach((sl,k)=>{const t=idx[k%idx.length]; const side=new THREE.MeshStandardMaterial({color:tiles[t].side,roughness:0.6});
+  const top=new THREE.MeshStandardMaterial({map:texs[t],roughness:0.5});
+  const m=new THREE.Mesh(geo,[top,side]); m.position.copy(sl.p); m.castShadow=m.receiveShadow=true; scene.add(m);});
+window.addEventListener("error",e=>console.log("ERR "+e.message+" "+(e.error&&e.error.stack)));
+renderer.render(scene,cam); document.title='done '+slots.filter(s=>s.vis).length+'/'+tiles.length;
+</script></body></html>
