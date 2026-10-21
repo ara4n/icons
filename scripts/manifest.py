@@ -127,7 +127,7 @@ PROJECTS = {
  "Grid": "https://github.com/grid-location/grid",
  "Fractal Networks": "https://fractalnetworks.co",
  "RemoteRails": "https://remoterails.com",
- "Nordeck": "https://nordeck.net",
+ "Nordeck": "https://github.com/nordeck/matrix-neoboard",
  "Famedly": "https://famedly.com",
  "Connect2x": "https://connect2x.com",
  "Tchap": "https://tchap.gouv.fr",
