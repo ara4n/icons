@@ -98,7 +98,7 @@ SRC={
  "Telodendria": W("https://telodendria.io"),
  "Fractal Networks": W("https://fractalnetworks.co"),
  "RemoteRails": W("https://remoterails.com"),
- "Nordeck": W("https://nordeck.net"),
+ "Nordeck": R("https://github.com/nordeck/matrix-neoboard","packages/react-sdk/src/components/ImageUpload/test_files/nordeck.svg"),
  "Famedly": W("https://famedly.com"),
  "Connect2x": W("https://connect2x.com"),
  "Tchap": W("https://tchap.gouv.fr"),
